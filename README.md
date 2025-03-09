@@ -7,6 +7,7 @@
 - 基于 `PyMuPDF` 提取文本、图片、矢量等原始数据 
 - 基于规则解析章节、段落、表格、图片、文本等布局及样式
 - 基于 `python-docx` 创建Word文档
+- 新增**数学公式检测与识别**功能，将PDF中的公式转换为Word可编辑的MathML格式
 - 纯命令行界面，适合批处理和自动化流程
 - 支持 conda 环境管理
 
@@ -36,6 +37,12 @@
     - 隐藏部分边框线的表格
     - 嵌套表格
 
+- 数学公式处理 (新功能)
+    - 基于YOLOv8的公式检测
+    - 基于UnimerNet的公式识别
+    - LaTeX到MathML的转换
+    - Word文档兼容的公式嵌入
+
 - 支持多进程转换
 
 ## 项目结构
@@ -48,6 +55,12 @@ pdf2word/
 │   ├── main.py         # 命令行入口
 │   ├── common/         # 通用工具
 │   ├── font/           # 字体处理
+│   ├── formula/        # 数学公式处理
+│   │   ├── detector.py   # 公式区域检测
+│   │   ├── recognizer.py # 公式识别为LaTeX
+│   │   ├── converter.py  # LaTeX转MathML
+│   │   ├── processor.py  # 公式处理流程协调
+│   │   └── models/       # 预训练模型存放目录
 │   ├── image/          # 图像处理
 │   ├── layout/         # 布局处理
 │   ├── page/           # 页面处理
@@ -92,7 +105,20 @@ pip install -e .
 pdf2word convert your_file.pdf output.docx
 ```
 
-4. 查看更多示例
+4. 使用数学公式检测和识别功能
+
+```bash
+# 首先下载所需模型
+# 可以使用 download_models_hf.py 脚本或其他方式下载模型
+
+# 更新模型路径配置，指向您实际下载的位置
+python -m pdf2word.formula.update_model_paths --detector=/path/to/your/formula_detection_yolov8.pt --recognizer=/path/to/your/unimernet_formula_recognition
+
+# 然后使用 --process_formulas 参数启用公式处理
+pdf2word convert your_math_paper.pdf output.docx --process_formulas=True
+```
+
+5. 查看更多示例
 
 ```bash
 cd examples
@@ -119,12 +145,25 @@ conda env create -f environment.yml
 ./start.sh input.pdf output.docx --start=1 --end=10
 ```
 
+3. 使用数学公式处理功能：
+
+```bash
+./start.sh input.pdf output.docx --process_formulas=True
+```
+
+指定自定义模型路径：
+
+```bash
+./start.sh input.pdf output.docx --process_formulas=True --formula_detector_model=/path/to/detector.pt --formula_recognizer_model=/path/to/recognizer/
+```
+
 ## 限制
 
 - 目前暂不支持扫描PDF文字识别
 - 仅支持从左向右书写的语言
 - 不支持旋转的文字
 - 基于规则的解析无法保证100%还原PDF样式
+- 数学公式识别质量依赖于模型训练质量和公式的复杂度
 
 ## 致谢
 

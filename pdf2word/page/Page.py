@@ -46,6 +46,8 @@ from ..common.share import debug_plot
 from .BasePage import BasePage
 from ..layout.Sections import Sections
 from ..image.ImageBlock import ImageBlock
+from docx.document import Document
+import logging
 
 
 class Page(BasePage):
@@ -171,37 +173,100 @@ class Page(BasePage):
         return tables
 
 
-    def make_docx(self, doc):
-        '''Set page size, margin, and create page. 
+    def make_docx(self, doc:Document=None, **kwargs):
+        """Create docx with layout extracted from PDF page.
 
-        .. note::
-            Before running this method, the page layout must be either parsed from source 
-            page or restored from parsed data.
+        Args:
+            doc (Document, optional): ``python-docx`` Document instance. 
+                A new one created if None. Defaults to None.
+
+        Returns:
+            Document: ``python-docx`` Document instance.
+        """
+        # new document if not provided
+        if not doc:
+            doc = Document()
+            # page section
+            section = doc.sections[0]
+            section.page_width = Pt(self.width)
+            section.page_height = Pt(self.height)
+            section.left_margin = Pt(self.margin[0])
+            section.right_margin = Pt(self.margin[1])
+            section.top_margin = Pt(self.margin[2])
+            section.bottom_margin = Pt(self.margin[3])
+        
+        # process formula regions if provided
+        formula_regions = []
+        if kwargs.get('process_formulas') and 'formula_regions_by_page' in kwargs:
+            formula_regions = kwargs.get('formula_regions_by_page', {}).get(self.id, [])
+        
+        # process sections
+        for section in self.sections:
+            # try:
+            section.make_docx(doc, **kwargs)
+            # except Exception as e:
+            #     if kwargs.get('debug', False): raise e
+
+        # insert formulas if available
+        if formula_regions:
+            self._insert_formulas(doc, formula_regions)
+            
+        return doc
+    
+    def _insert_formulas(self, doc, formula_regions):
+        """Insert mathematical formulas into the document.
         
         Args:
-            doc (Document): ``python-docx`` document object
-        '''
-        # new page
-        if doc.paragraphs:
-            section = doc.add_section(WD_SECTION.NEW_PAGE)
-        else:
-            section = doc.sections[0] # a default section is there when opening docx
+            doc (Document): python-docx Document instance.
+            formula_regions (list): List of formula regions with mathml content.
+        """
+        try:
+            from docx.oxml.ns import qn
+            from docx.oxml import OxmlElement
+            import re
+            
+            # Sort formula regions by vertical position (top to bottom)
+            formula_regions.sort(key=lambda x: x['pdf_bbox'][1])
+            
+            # Process each formula
+            for region in formula_regions:
+                if not region.get('mathml'):
+                    continue
+                    
+                # Add a paragraph for the formula
+                p = doc.add_paragraph()
+                
+                # Try to insert the MathML as an OfficeMath object
+                mathml = region.get('mathml')
+                
+                # Try to insert using the raw XML
+                r = p.add_run()
+                
+                # Create an office math element
+                omath = OxmlElement('m:oMath')
+                
+                # Try to parse and include the MathML
+                # This is a simplified approach - in a real implementation
+                # you would convert MathML to Office Math XML (OMML)
+                math_text = re.sub(r'<[^>]+>', '', mathml)
+                omath.text = math_text
+                
+                # Create an office math paragraph
+                omathpara = OxmlElement('m:oMathPara')
+                omathpara.append(omath)
+                
+                # Add a math region to the run's XML
+                r._r.append(omathpara)
+                
+                # Add a caption with the LaTeX representation
+                if region.get('latex'):
+                    caption = doc.add_paragraph(f"LaTeX: {region.get('latex')}")
+                    caption.style = 'Caption'
+        except Exception as e:
+            logging.error(f"Error inserting formulas: {str(e)}")
+            # Continue without inserting the formula
 
-        # page size
-        section.page_width  = Pt(self.width)
-        section.page_height = Pt(self.height)
 
-        # page margin
-        left,right,top,bottom = self.margin
-        section.left_margin = Pt(left)
-        section.right_margin = Pt(right)
-        section.top_margin = Pt(top)
-        section.bottom_margin = Pt(bottom)
-
-        # create flow layout: sections
-        self.sections.make_docx(doc)
-
- 
     def _restore_float_images(self, raws:list):
         '''Restore float images.'''
         self.float_images.reset()

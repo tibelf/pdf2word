@@ -12,6 +12,9 @@ def convert(pdf_file:str,
             end:int=None,
             pages:list=None,
             multi_processing:bool=False,
+            process_formulas:bool=False,
+            formula_detector_model:str=None,
+            formula_recognizer_model:str=None,
             **kwargs):
     '''Convert pdf file to docx file.
 
@@ -23,6 +26,9 @@ def convert(pdf_file:str,
         end (int, optional): Last page to process. Defaults to None.
         pages (list, optional): Range of pages, e.g. --pages=1,3,5. Defaults to None.
         multi_processing (bool, optional): Whether to use multi-processing. Defaults to False.
+        process_formulas (bool, optional): Whether to detect and process math formulas. Defaults to False.
+        formula_detector_model (str, optional): Path to custom formula detection model. Defaults to None.
+        formula_recognizer_model (str, optional): Path to custom formula recognition model. Defaults to None.
         kwargs (dict) : Configuration parameters.
     '''
     # Ensure kwargs contains required defaults
@@ -35,6 +41,11 @@ def convert(pdf_file:str,
         start = max(start-1, 0)
         if end: end -= 1
         if pages: pages = [i-1 for i in pages]
+
+    # Add formula processing options to kwargs
+    kwargs['process_formulas'] = process_formulas
+    kwargs['formula_detector_model'] = formula_detector_model
+    kwargs['formula_recognizer_model'] = formula_recognizer_model
 
     cv = Converter(pdf_file, password)
     try:
@@ -96,10 +107,17 @@ class CLI:
                 end:int=None,
                 pages:list=None,
                 multi_processing:bool=False,
+                process_formulas:bool=False,
+                formula_detector_model:str=None,
+                formula_recognizer_model:str=None,
                 **kwargs):
         '''Convert pdf file to docx file.'''
-        # Pass multi_processing as a positional argument since the convert function expects it
-        convert(pdf_file, docx_file, password, start, end, pages, multi_processing, **kwargs)
+        # Include multi_processing and formula options in kwargs
+        kwargs['multi_processing'] = multi_processing
+        kwargs['process_formulas'] = process_formulas
+        kwargs['formula_detector_model'] = formula_detector_model
+        kwargs['formula_recognizer_model'] = formula_recognizer_model
+        convert(pdf_file, docx_file, password, start, end, pages, **kwargs)
 
     def table(self, pdf_file:str,
               password:str=None,

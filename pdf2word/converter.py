@@ -348,6 +348,39 @@ class Converter:
             raise ConversionException('Multi-processing works for continuous pages '
                                     'specified by "start" and "end" only.')
         
+        # Check if formula processing is enabled
+        process_formulas = settings.get('process_formulas', False)
+        formula_regions_by_page = {}
+        
+        # If formula processing is enabled, initialize the formula processor
+        if process_formulas:
+            try:
+                from .formula import FormulaProcessor
+                
+                formula_detector_model = settings.get('formula_detector_model')
+                formula_recognizer_model = settings.get('formula_recognizer_model')
+                
+                logging.info('Formula processing enabled. Initializing formula processor...')
+                formula_processor = FormulaProcessor(
+                    detector_model=formula_detector_model,
+                    recognizer_model=formula_recognizer_model
+                )
+                
+                # Process the document to detect and recognize formulas
+                formula_regions_by_page = formula_processor.process_document(
+                    self._fitz_doc, start, end, pages
+                )
+                
+                # Store formula regions in settings for later use during docx creation
+                settings['formula_regions_by_page'] = formula_regions_by_page
+                logging.info(f'Formula processing completed. Found formulas on {len(formula_regions_by_page)} pages.')
+            except ImportError:
+                logging.error('Formula processing requires additional dependencies. Run: pip install ultralytics torch transformers latex2mathml')
+                settings['process_formulas'] = False
+            except Exception as e:
+                logging.error(f'Error during formula processing: {str(e)}')
+                settings['process_formulas'] = False
+        
         # convert page by page
         if settings['multi_processing']:
             self._convert_with_multi_processing(docx_filename, start, end, **settings)

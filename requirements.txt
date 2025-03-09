@@ -1,6 +1,11 @@
 PyMuPDF>=1.19.0
-python-docx>=0.8.10
+python-docx>=0.8.11
 fonttools>=4.24.0
-numpy>=1.17.2
-opencv-python-headless>=4.5
-fire>=0.3.0 
+numpy>=1.22.0
+opencv-python>=4.5.5
+fire>=0.4.0
+# 数学公式处理依赖
+ultralytics>=8.0.0  # YOLOv8模型
+torch>=1.13.0  # PyTorch深度学习框架
+transformers>=4.25.0  # 用于UnimerNet模型
+latex2mathml>=3.0.0  # LaTeX到MathML转换 
