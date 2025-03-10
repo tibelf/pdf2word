@@ -1,0 +1,2 @@
+[console_scripts]
+pdf2word = pdf2word.main:main
