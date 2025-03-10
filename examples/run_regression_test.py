@@ -141,11 +141,38 @@ def check_for_bugs(conda_env):
     return True
 
 
+def check_numpy_version(conda_env):
+    """Check NumPy version and fix if needed."""
+    logger.info("Checking NumPy version compatibility...")
+    
+    cmd = f"conda run -n {conda_env} python -c \"import numpy; print('NumPy version:', numpy.__version__); print('NUMPY_VERSION_OK:' + ('0' if numpy.__version__.startswith('2.') else '1'))\""
+    success, output = run_command(cmd)
+    
+    if not success:
+        logger.warning("Failed to check NumPy version")
+        return
+    
+    # Check if we need to fix NumPy version
+    if 'NUMPY_VERSION_OK:0' in output:
+        logger.warning("NumPy 2.x detected. This may cause compatibility issues with formula detection.")
+        response = input("Would you like to downgrade NumPy to version 1.x? (y/n): ")
+        
+        if response.lower() == 'y':
+            logger.info("Downgrading NumPy...")
+            cmd = f"conda run -n {conda_env} python fix_numpy_issue.py --reinstall-deps"
+            run_command(cmd)
+            logger.info("NumPy version fixed. Please run the tests again.")
+            sys.exit(0)
+        else:
+            logger.warning("Continuing with NumPy 2.x. Formula detection might not work correctly.")
+
+
 def main():
     """Run regression tests."""
     parser = argparse.ArgumentParser(description="Run regression tests for pdf2word")
     parser.add_argument('pdf_path', help='Path to a PDF file for testing')
     parser.add_argument('--conda-env', default='pdf2word', help='Conda environment name (default: pdf2word)')
+    parser.add_argument('--skip-numpy-check', action='store_true', help='Skip NumPy version check')
     args = parser.parse_args()
     
     # Check if PDF file exists
@@ -159,6 +186,10 @@ def main():
     
     # Record start time
     start_time = time.time()
+    
+    # Step 0: Check NumPy version compatibility
+    if not args.skip_numpy_check:
+        check_numpy_version(args.conda_env)
     
     # Step 1: Install formula dependencies
     install_formula_deps(args.conda_env)

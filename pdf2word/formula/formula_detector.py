@@ -5,19 +5,50 @@ This module can detect mathematical formulas in PDF pages.
 
 import os
 import logging
+import sys
 import numpy as np
 from PIL import Image
 import fitz  # PyMuPDF
 
 logger = logging.getLogger(__name__)
 
-# Try to import required dependencies
+# 检查NumPy版本并提出警告
+numpy_version = np.__version__
+if numpy_version.startswith('2.'):
+    logger.warning(f"NumPy 2.x detected (version {numpy_version}). This may cause compatibility issues with YOLO.")
+    logger.warning("Consider downgrading NumPy to version <2.0 for better compatibility.")
+
+# Try to import required dependencies with better error handling
+HAS_DEPS = False
+NUMPY_VERSION_ERROR = False
+
 try:
-    from ultralytics import YOLO
-    HAS_DEPS = True
+    # First check if we can safely import YOLO with current NumPy version
+    if numpy_version.startswith('2.'):
+        # 尝试设置环境变量，禁用NumPy数组API（可能有助于兼容性）
+        os.environ['NUMPY_EXPERIMENTAL_ARRAY_FUNCTION'] = '0'
+        # 将警告转为错误来捕获潜在问题
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            try:
+                from ultralytics import YOLO
+                HAS_DEPS = True
+                logger.info("Successfully loaded YOLO with NumPy 2.x")
+            except Warning as w:
+                if '_ARRAY_API not found' in str(w):
+                    NUMPY_VERSION_ERROR = True
+                    logger.warning(f"YOLO compatibility issue with NumPy 2.x: {w}")
+                    logger.warning("Formula detection will be disabled due to NumPy version compatibility issue.")
+    else:
+        # NumPy 1.x应该没有兼容性问题
+        from ultralytics import YOLO
+        HAS_DEPS = True
 except ImportError:
-    HAS_DEPS = False
     logger.warning("Formula detection dependencies (YOLO) not found. Formula detection will be disabled.")
+except Exception as e:
+    logger.warning(f"Error loading YOLO: {e}")
+    logger.warning("Formula detection will be disabled.")
 
 
 class FormulaDetector:
@@ -32,6 +63,11 @@ class FormulaDetector:
         """
         self.model = None
         self.model_loaded = False
+        
+        # If NumPy version error occurred, don't even try to load
+        if NUMPY_VERSION_ERROR:
+            logger.warning("Skipping formula detection model loading due to NumPy version compatibility issues")
+            return
         
         # If no model_dir specified, try to use default location
         if model_dir is None:
@@ -52,7 +88,7 @@ class FormulaDetector:
         # Only attempt to load the model if dependencies are available
         if HAS_DEPS:
             try:
-                model_path = os.path.join(model_dir, 'yolov8m.pt')
+                model_path = os.path.join(model_dir, 'yolo_v8_ft.pt')
                 if os.path.exists(model_path):
                     self.model = YOLO(model_path)
                     self.model_loaded = True
