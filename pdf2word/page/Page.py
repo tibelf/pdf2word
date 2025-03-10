@@ -34,6 +34,10 @@ Page elements structure:
         }, ...],
         "floats": [{
             ... # floating picture
+        }, ...],
+        "formulas": [{
+            "bbox": [x0, y0, x1, y1],
+            "latex": "..."
         }, ...]
     }
 
@@ -46,6 +50,7 @@ from ..common.share import debug_plot
 from .BasePage import BasePage
 from ..layout.Sections import Sections
 from ..image.ImageBlock import ImageBlock
+import logging
 
 
 class Page(BasePage):
@@ -59,7 +64,8 @@ class Page(BasePage):
                         footer:str=None, 
                         margin:tuple=None, 
                         sections:Sections=None,
-                        float_images:BaseCollection=None):
+                        float_images:BaseCollection=None,
+                        formulas:list=None):
         '''Initialize page layout.
 
         Args:
@@ -72,6 +78,7 @@ class Page(BasePage):
             margin (tuple, optional): Page margin. Defaults to None.
             sections (Sections, optional): Page contents. Defaults to None.
             float_images (BaseCollection, optional): Float images in th is page. Defaults to None.
+            formulas (list, optional): Mathematical formulas in this page. Defaults to None.
         ''' 
         # page index
         self.id = id
@@ -91,6 +98,9 @@ class Page(BasePage):
         
         # floating images are separate node under page
         self.float_images = float_images or BaseCollection()
+        
+        # mathematical formulas
+        self.formulas = formulas or []
 
         self._finalized = False
 
@@ -100,17 +110,33 @@ class Page(BasePage):
 
 
     def store(self):
-        '''Store parsed layout in dict format.'''
+        '''Store parsed layout data.'''
         res = {
-            'id'      : self.id,
-            'width'   : self.width,
-            'height'  : self.height,
-            'margin'  : self.margin,
-            'sections': self.sections.store(),
-            'header'  : self.header,
-            'footer'  : self.footer,
-            'floats'  : self.float_images.store()
+            'id'     : self.id,
+            'width'  : self.width,
+            'height' : self.height,
+            'margin' : self.margin,
+            'header' : self.header,
+            'footer' : self.footer
         }
+
+        # sections
+        res.update({
+            'sections': self.sections.store()
+        })
+
+        # float images
+        if self.float_images:
+            res.update({
+                'float_images': self.float_images.store()
+            })
+        
+        # formulas
+        if self.formulas:
+            res.update({
+                'formulas': self.formulas
+            })
+
         return res
 
 
@@ -122,40 +148,77 @@ class Page(BasePage):
         # page width/height
         self.width = data.get('width', 0.0)
         self.height = data.get('height', 0.0)
-        self.margin = data.get('margin', (0,) * 4)
-        
-        # parsed layout
-        self.sections.restore(data.get('sections', []))
+
+        # page margin
+        self.margin = data.get('margin', (0,0,0,0))
+
+        # page header, footer
         self.header = data.get('header', '')
         self.footer = data.get('footer', '')
 
+        # sections
+        self.sections.restore(data.get('sections', []))
+
         # float images
-        self._restore_float_images(data.get('floats', []))
+        if 'float_images' in data:
+            self._restore_float_images(data.get('float_images', []))
+        
+        # formulas
+        self.formulas = data.get('formulas', [])
 
-        # Suppose layout is finalized when restored; otherwise, set False explicitly
-        # out of this method.
+        # mark page as finalized
         self._finalized = True
-
-        return self
 
 
     @debug_plot('Final Layout')
     def parse(self, **settings):
         '''Parse page layout.'''
-        self.sections.parse(**settings)
-        self._finalized = True
-        return self.sections # for debug plot
+        # Raised when page layout is invalid or nothing extracted
+        if self.skip_parsing:
+            return False 
+
+        # already finalized
+        if self._finalized: return True
+
+        try:
+            # Parse the page content using raw_dict
+            raw_dict = settings.get('raw_dict')
+            if not raw_dict:
+                logging.error('No raw dict provided for parsing page %d', self.id)
+                return False
+
+            # parse sections
+            status = self.sections.parse(**settings)
+            
+            # Always mark as finalized for now, even if status is False
+            # This ensures the page is included in the output
+            self._finalized = True
+            
+            # process formulas if enabled
+            if settings.get('process_formulas', False):
+                self._process_formulas(**settings)
+
+            return True
+            
+        except Exception as e:
+            logging.error('Error parsing page %d: %s', self.id, e)
+            return False
 
 
     def extract_tables(self, **settings):
-        '''Extract content from tables (top layout only).
+        '''Extract table contents from page. 
         
-        .. note::
-            Before running this method, the page layout must be either parsed from source 
-            page or restored from parsed data.
+        Args:
+            settings (dict): Parsing parameters.
+
+        Returns:
+            list: A list of ``tabula.Table`` instances.
         '''
-        # table blocks
-        collections = []        
+        # initialize empty tables
+        tables = []
+
+        # collect all table blocks
+        collections = []
         for section in self.sections:
             for column in section:
                 if settings['extract_stream_table']:
@@ -200,12 +263,75 @@ class Page(BasePage):
 
         # create flow layout: sections
         self.sections.make_docx(doc)
+        
+        # add formulas if available
+        self._add_formulas_to_docx(doc)
 
  
     def _restore_float_images(self, raws:list):
         '''Restore float images.'''
         self.float_images.reset()
         for raw in raws:
-            image = ImageBlock(raw)
+            image = ImageBlock()
+            image.restore(raw)
             image.set_float_image_block()
             self.float_images.append(image)
+            
+    def _process_formulas(self, **settings):
+        '''Detect and process mathematical formulas in the page.'''
+        # Only process if formula processing is enabled and formula_processor is available
+        if not settings.get('process_formulas', False):
+            return
+            
+        try:
+            # Import formula processor
+            from ..formula.formula_processor import FormulaProcessor
+            
+            # Create processor if not exists
+            if not hasattr(self, '_formula_processor'):
+                self._formula_processor = FormulaProcessor()
+                
+            # Skip if processor is not enabled
+            if not self._formula_processor.enabled:
+                return
+                
+            # Get source page from fitz
+            source_page = settings.get('source_page')
+            if not source_page:
+                return
+                
+            # Process page to get formulas
+            formulas = self._formula_processor.process_page(source_page)
+            
+            # Store formulas
+            self.formulas = formulas
+            
+        except Exception as e:
+            logging.error(f"Error processing formulas on page {self.id}: {e}")
+            
+    def _add_formulas_to_docx(self, doc):
+        '''Add formulas to the docx document.'''
+        if not self.formulas:
+            return
+            
+        # Import for creating paragraphs
+        from docx.enum.text import WD_ALIGN_PARAGRAPH
+        
+        # Add each formula as a separate paragraph
+        for formula in self.formulas:
+            latex = formula.get('latex', '')
+            if not latex:
+                continue
+                
+            # Check if it's a display formula (centered) or inline formula
+            is_display = latex.startswith('\\[') or latex.startswith('\\begin{')
+            
+            # Create paragraph for the formula
+            p = doc.add_paragraph()
+            
+            # Center align display formulas
+            if is_display:
+                p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                
+            # Add LaTeX code
+            p.add_run(latex)

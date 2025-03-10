@@ -109,6 +109,7 @@ class Converter:
             'delete_end_line_hyphen'         : False,  # delete hyphen at the end of a line
             'raw_exceptions'                 : False,  # Don't swallow exceptions
             'list_not_table'                 : True,   # Avoid treating bullet list as table.
+            'process_formulas'               : False,  # process mathematical formulas if True
         }
 
     # -----------------------------------------------------------------------
@@ -164,34 +165,58 @@ class Converter:
     
 
     def parse_document(self, **kwargs):
-        '''Step 2 of converting process: analyze whole document, e.g. page section,
-        header/footer and margin.'''
+        '''Step 2 of converting process: analyze document structure, e.g. title, table of contents, header/footer.'''
         logging.info(self._color_output('[2/4] Analyzing document...'))
-        
-        self._pages.parse(self.fitz_doc, **kwargs)
         return self
 
     
-    def parse_pages(self, **kwargs):
-        '''Step 3 of converting process: parse pages, e.g. paragraph, image and table.'''
-        logging.info(self._color_output('[3/4] Parsing pages...'))
+    def parse_pages(self, start:int=0, end:int=None, pages:list=None, **kwargs):
+        '''Parse specified PDF pages, with multi-processing option.
 
-        pages = [page for page in self._pages if not page.skip_parsing]
-        num_pages = len(pages)
-        for i, page in enumerate(pages, start=1):
-            pid = page.id + 1
-            logging.info('(%d/%d) Page %d', i, num_pages, pid)
-            try:
-                page.parse(**kwargs)
-            except Exception as e:
-                if kwargs['raw_exceptions']:
-                    raise
-                if not kwargs['debug'] and kwargs['ignore_page_error']:
-                    logging.error('Ignore page %d due to parsing page error: %s', pid, e)
-                else:
-                    raise ConversionException(f'Error when parsing page {pid}: {e}')
+        Args:
+            start (int, optional): First page to process. Defaults to 0.
+            end (int, optional): Last page to process. Defaults to None.
+            pages (list, optional): Range of pages, e.g. [1,3,5]. Defaults to None.
+            kwargs (dict, optional): Other configurations for parsing pages.
+        
+        Returns:
+            list: Parsed pages.
+        '''
+        logging.info(self._color_output('[1/4] Analyzing pages...'))
+        
+        # initialize empty pages if necessary
+        page_count = len(self._fitz_doc)
+        if not self._pages: 
+            self._pages.reset([Page(id=i) for i in range(page_count)])
+        
+        # multi-processing: synchronize pages in each process
+        if kwargs.get('multi_processing', False):
+            # initialize
+            wrapper, i_pages, cpu_count = self._init_multi_processing(
+                start, end, pages, kwargs.get('cpu_count', 0))
+            
+            if not i_pages: return self._pages
+            
+            # process pages
+            pages_per_cpu = len(i_pages) // cpu_count + 1
+            logging.info('Start parsing pages with %d processes...', cpu_count)
+            with Pool(processes=cpu_count) as p:
+                parsed_pages = p.map(wrapper, i_pages, pages_per_cpu)
+                
+            # update pages
+            for page in filter(None, parsed_pages):
+                self._pages[page.id] = page
 
-        return self
+        # single process
+        else:
+            num = len(self._pages)
+            i_pages = list(range(num))[start:end] if end else list(range(num))[start:]
+            if pages: i_pages = [i for i in pages if 0<=i<num]
+            
+            for i in i_pages:
+                self._parse_page(i, **kwargs)
+
+        return self._pages
 
 
     def make_docx(self, filename_or_stream=None, **kwargs):
@@ -309,52 +334,36 @@ class Converter:
         # layout information for debugging
         self.serialize(layout_file)
 
-    def convert(self, docx_filename: Union[str, IO[AnyStr]] = None, start: int = 0, end: int = None, pages: list = None,
-                **kwargs):
-        """Convert specified PDF pages to docx file.
+    def convert(self, docx_filename:str=None, start:int=0, end:int=None, pages:list=None, **kwargs):
+        '''Convert specified PDF pages to docx.
 
         Args:
-            docx_filename (str, file-like, optional): docx file to write. Defaults to None.
-            start (int, optional): First page to process. Defaults to 0, the first page.
-            end (int, optional): Last page to process. Defaults to None, the last page.
-            pages (list, optional): Range of page indexes. Defaults to None.
-            kwargs (dict, optional): Configuration parameters. Defaults to None.
+            docx_filename (str, optional): docx filename to write to. Defaults to None.
+            start (int, optional): First page to process. Defaults to 0.
+            end (int, optional): Last page to process. Defaults to None.
+            pages (list, optional): Range of pages, e.g. [1,3,5]. Defaults to None.
+            kwargs (dict, optional): Configuration parameters for parsing each page.
         
-        Refer to :py:meth:`~pdf2docx.converter.Converter.default_settings` for detail of 
-        configuration parameters.
-        
-        .. note::
-            Change extension from ``pdf`` to ``docx`` if ``docx_file`` is None.
-        
-        .. note::
-            * ``start`` and ``end`` is counted from zero if ``--zero_based_index=True`` (by default).
-            * Start from the first page if ``start`` is omitted.
-            * End with the last page if ``end`` is omitted.
-        
-        .. note::
-            ``pages`` has a higher priority than ``start`` and ``end``. ``start`` and ``end`` works only
-            if ``pages`` is omitted.
+        Returns:
+            Converter: self
+        '''
+        # default settings for conversion
+        default = self.default_settings
+        kwargs_ = {k: kwargs.get(k, v) for k, v in default.items()}
 
-        .. note::
-            Multi-processing works only for continuous pages specified by ``start`` and ``end`` only.
-        """
-        t0 = perf_counter()
-        logging.info('Start to convert %s', self.filename_pdf)
-        settings = self.default_settings
-        settings.update(kwargs)
-
-        # input check
-        if pages and settings['multi_processing']:
-            raise ConversionException('Multi-processing works for continuous pages '
-                                    'specified by "start" and "end" only.')
-        
-        # convert page by page
-        if settings['multi_processing']:
-            self._convert_with_multi_processing(docx_filename, start, end, **settings)
-        else:
-            self.parse(start, end, pages, **settings).make_docx(docx_filename, **settings)
-
-        logging.info('Terminated in %.2fs.', perf_counter()-t0)        
+        try:            
+            # parse pages
+            self.parse_pages(start=start, end=end, pages=pages, **kwargs_)
+            
+            # make docx
+            self.make_docx(docx_filename, **kwargs_)
+            
+        except Exception as e:
+            logging.error(e)
+            if kwargs_.get('raw_exceptions', False):
+                raise
+                
+        return self
 
 
     def extract_tables(self, start:int=0, end:int=None, pages:list=None, **kwargs):
@@ -474,7 +483,90 @@ class Converter:
     def _color_output(msg): return f'\033[1;36m{msg}\033[0m'
 
 
+    def _parse_page(self, i:int, **kwargs):
+        '''Parse specified page, and create docx page if required.
+
+        Args:
+            i (int): Page index to parse.
+            kwargs (dict): Configuration parameters.
+
+        Returns:
+            Page: parsed page instance.
+        '''
+        # get page
+        page = self.pages[i] if 0<=i<len(self.pages) else Page(id=i)
+
+        # source/parsed/docx files
+        if page.finalized:
+            if not kwargs.get('overwrite', True):
+                return page
+            
+        # debug check
+        debug = kwargs.get('debug', False)
+        if debug:
+            page_structure = []
+        
+        # reset page and load source data
+        source_page = self._fitz_doc[i]
+        raw_dict = source_page.get_text('dict')
+        page.skip_parsing = False 
+
+        # add source page to kwargs to allow formula processing
+        kwargs['source_page'] = source_page
+
+        logging.info('Parsing page %d...', i+1)
+        try:
+            # parse layout
+            page.parse(**{**kwargs, 'raw_dict': raw_dict})
+            
+        except Exception as e:
+            if kwargs.get('debug', False):
+                logging.error('Layout parsing error: %s', e)
+                raise e
+            
+            if kwargs.get('ignore_page_error', True):
+                logging.error('Ignore page %d due to parsing error: %s', i+1, e)
+            else:
+                raise ParseException(f'Parse error on page {i+1}: {e}')
+
+        return page
+        
+    def _init_multi_processing(self, start:int, end:int, pages:list, cpu_count:int=None):
+        '''Multi-processing initialization.'''
+        if cpu_count is None:
+            cpu_count = min(os.cpu_count(), 4)
+        
+        # Pass arguments to the pool from the current object state
+        # but need to recreate fitz_doc for each process
+        kwargs = {
+            'filename_pdf': self.filename_pdf,
+            'password': self.password
+        }
+        
+        def wrapper(i):
+            # create converter for each process
+            cv = Converter(**kwargs)
+            try:
+                # Parse with original arguments but in separate process
+                return cv._parse_page(i)
+            except Exception as e:
+                logging.error('Error parsing page %d: %s', i + 1, e)
+                return None
+            finally:
+                cv.close()
+        
+        # prepare parameters
+        num = len(self._pages)
+        i_pages = list(range(num))[start:end] if end else list(range(num))[start:]
+        if pages: i_pages = [i for i in pages if 0<=i<num]
+        
+        return wrapper, i_pages, cpu_count
+
+
 class ConversionException(Exception): 
+    pass
+
+class ParseException(ConversionException): 
     pass
 
 class MakedocxException(ConversionException): 
