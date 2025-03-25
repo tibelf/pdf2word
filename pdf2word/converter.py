@@ -110,6 +110,8 @@ class Converter:
             'delete_end_line_hyphen'         : False,  # delete hyphen at the end of a line
             'raw_exceptions'                 : False,  # Don't swallow exceptions
             'list_not_table'                 : True,   # Avoid treating bullet list as table.
+            'process_formulas'               : True,   # 是否处理数学公式
+            'export_formulas'                : False,  # 是否导出数学公式信息
         }
 
     # -----------------------------------------------------------------------
@@ -222,6 +224,12 @@ class Converter:
         # 初始化公式处理器并处理PDF文件中的公式
         if self.filename_pdf and kwargs.get('process_formulas', True):
             formula_integration = get_formula_integration()
+            
+            # 如果需要导出公式，启用导出功能
+            if kwargs.get('export_formulas', False):
+                formula_integration.enable_formula_export(True)
+                logging.info('Formula export enabled.')
+                
             try:
                 formula_integration.process_pdf_formulas(self.filename_pdf)
                 logging.info('Formula processing initialized.')

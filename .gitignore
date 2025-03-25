@@ -23,8 +23,12 @@ var/
 # Model files
 pdf2word/models/
 
+# Exported formulas
+pdf2word/formula_exports/
+
 # Test output
 output_with_formulas.docx
+output_with_formulas_exported.docx
 
 # Virtual environments
 venv/

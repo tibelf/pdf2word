@@ -9,6 +9,7 @@ import logging
 
 from .formula_processor import FormulaProcessor
 from .latex_to_docx import add_latex_equation_to_paragraph
+from .formula_exporter import get_formula_exporter
 
 class FormulaIntegration:
     """
@@ -21,6 +22,18 @@ class FormulaIntegration:
         self.formula_processor = FormulaProcessor()
         # 用于存储页面公式信息的字典
         self.page_formulas = {}
+        # 是否导出公式信息
+        self.enable_export = False
+        # PDF路径
+        self.pdf_path = None
+    
+    def enable_formula_export(self, enable=True):
+        """
+        启用或禁用公式导出功能
+        
+        :param enable: 是否启用导出
+        """
+        self.enable_export = enable
     
     def process_pdf_formulas(self, pdf_path):
         """
@@ -29,6 +42,12 @@ class FormulaIntegration:
         :param pdf_path: PDF文件路径
         :return: 包含所有页面公式信息的字典
         """
+        # 存储PDF路径
+        self.pdf_path = pdf_path
+        
+        # 获取导出器实例（如果启用了导出）
+        exporter = get_formula_exporter() if self.enable_export else None
+        
         # 打开PDF文件
         doc = fitz.open(pdf_path)
         
@@ -51,9 +70,18 @@ class FormulaIntegration:
                 'formulas': formulas,
                 'page_size': (page.rect.width, page.rect.height)
             }
+            
+            # 如果启用了导出，则导出当前页面的公式
+            if self.enable_export and exporter:
+                exporter.export_page_formulas(page_idx, pil_img, formulas)
         
         # 关闭PDF文件
         doc.close()
+        
+        # 如果启用了导出，生成摘要信息
+        if self.enable_export and exporter:
+            export_dir = exporter.export_summary(pdf_path)
+            logging.info(f"公式导出完成，导出目录: {export_dir}")
         
         return self.page_formulas
     
