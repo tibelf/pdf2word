@@ -361,7 +361,43 @@ class TextBlock(Block):
             pf.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
 
         # ------------------------------------
-        # add lines
+        # 尝试处理此文本块中的数学公式
+        # ------------------------------------
+        try:
+            # 获取公式处理器单例
+            from ..formula.formula_factory import get_formula_integration
+            formula_integration = get_formula_integration()
+            
+            # 获取当前页面ID
+            # 尝试获取页面索引，如果找不到就使用默认值0
+            page_idx = 0
+            try:
+                # 逐级向上查找，直到找到包含id属性的对象
+                current = self
+                while hasattr(current, 'parent') and current.parent is not None:
+                    current = current.parent
+                    if hasattr(current, 'id'):
+                        page_idx = current.id
+                        break
+            except Exception as e:
+                # 使用默认页码
+                import logging
+                logging.debug(f"无法获取页面ID，使用默认值0: {e}")
+            
+            # 尝试将公式集成到段落中
+            formula_processed = formula_integration.integrate_formula_to_docx(
+                None, page_idx, self, p)
+            
+            # 如果成功处理了公式，跳过后续文本处理
+            if formula_processed:
+                return p
+        except Exception as e:
+            # 处理公式失败，继续使用原有处理方式
+            import logging
+            logging.debug(f"Formula processing failed: {e}")
+
+        # ------------------------------------
+        # add lines (原有处理方式)
         # ------------------------------------
         for line in self.lines: line.make_docx(p)
 

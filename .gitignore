@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Model files
+pdf2word/models/
+
+# Test output
+output_with_formulas.docx
+
+# Virtual environments
+venv/
+ENV/
+
+# IDE
+.idea/
+.vscode/
+
+# OS specific
+.DS_Store
+Thumbs.db 

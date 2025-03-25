@@ -11,6 +11,7 @@ from docx import Document
 
 from .page.Page import Page
 from .page.Pages import Pages
+from .formula.formula_factory import get_formula_integration
 
 # check PyMuPDF version
 # 1.19.0 <= v <= 1.23.8, or v>=1.23.16
@@ -218,6 +219,15 @@ class Converter:
             else:
                 raise ConversionException("Please specify a docx file name or a file-like object to write.")
 
+        # 初始化公式处理器并处理PDF文件中的公式
+        if self.filename_pdf and kwargs.get('process_formulas', True):
+            formula_integration = get_formula_integration()
+            try:
+                formula_integration.process_pdf_formulas(self.filename_pdf)
+                logging.info('Formula processing initialized.')
+            except Exception as e:
+                logging.error(f'Failed to initialize formula processing: {e}')
+                
         # create page by page        
         docx_file = Document() 
         num_pages = len(parsed_pages)
